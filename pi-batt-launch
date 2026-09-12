@@ -1,0 +1,31 @@
+#!/bin/bash
+set -e
+
+# Pi-Batt GUI launcher. It works both from the desktop and from an SSH/PuTTY shell
+# as long as the user's graphical session is logged in.
+UID_NUM="$(id -u)"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/${UID_NUM}}"
+
+if [[ -n "${WAYLAND_DISPLAY:-}" && -S "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}" ]]; then
+    export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+else
+    for sock in wayland-0 wayland-1 wayland-2; do
+        if [[ -S "${XDG_RUNTIME_DIR}/${sock}" ]]; then
+            export WAYLAND_DISPLAY="$sock"
+            export QT_QPA_PLATFORM=wayland
+            break
+        fi
+    done
+fi
+
+# If no Wayland session is available, preserve a working X11 DISPLAY when one exists.
+if [[ -z "${WAYLAND_DISPLAY:-}" && -n "${DISPLAY:-}" ]]; then
+    export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+fi
+
+if [[ "${1:-}" == "--tray" ]]; then
+    # Let the desktop panel/session settle before creating the tray icon at login.
+    sleep 2
+fi
+
+exec /usr/bin/python3 /opt/pi-batt/gui.py "$@"

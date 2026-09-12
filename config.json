@@ -1,0 +1,17 @@
+{
+  "poll_seconds": 2,
+  "history_interval_seconds": 15,
+  "history_retention_days": 90,
+  "warning_percent": 20,
+  "critical_percent": 10,
+  "shutdown_percent": 5,
+  "shutdown_confirm_seconds": 20,
+  "shutdown_countdown_seconds": 60,
+  "emergency_cell_mv": 3000,
+  "shutdown_enabled": false,
+  "trigger_hat_power_cut": false,
+  "auto_start_on_power": true,
+  "event_debounce_seconds": 6,
+  "auto_update_check": true,
+  "update_check_hours": 6
+}

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Pi-Batt Battery Monitor
+Comment=Monitor the Waveshare UPS HAT E
+Exec=/usr/local/bin/pi-batt
+Terminal=false
+Categories=System;Utility;
+StartupNotify=true

@@ -1,0 +1,15 @@
+[Unit]
+Description=Pi-Batt Waveshare UPS HAT E monitor
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/pi-batt/daemon.py
+WorkingDirectory=/opt/pi-batt
+Restart=always
+RestartSec=3
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

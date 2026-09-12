@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Pi-Batt
+Comment=UPS HAT E battery monitor
+Exec=/usr/local/bin/pi-batt --tray
+Terminal=false
+Categories=System;Utility;
+X-GNOME-Autostart-enabled=true
+X-LXQt-Need-Tray=true
+StartupNotify=false
