@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3
+- Redesign the GUI again for smaller Raspberry Pi displays with tighter spacing and improved readability.
+- Make all major tabs scrollable so the interface remains usable on shorter screens.
+- Rebuild the dashboard into compact battery and input/status sections with smaller metric cards.
+- Improve settings usability with better control sizing and more consistent form spacing.
+- Rework the updater tab into a more compact two-row action layout for reduced-width displays.
+- Reduce the default window size and minimum size to better fit portable and embedded Pi screens.
+
 ## 1.0.2
 - Redesign the Pi-Batt GUI with a modern dark dashboard, status hero card, battery bar, cleaner metric cards, and improved tab styling.
 - Reorganize Settings into clearer battery, shutdown, and general sections.

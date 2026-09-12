@@ -1,10 +1,10 @@
-# Pi-Batt v1.0.2
+# Pi-Batt v1.0.3
 
 Pi-Batt is a Raspberry Pi desktop + system service monitor for the Waveshare UPS HAT (E). It began as PiUPS and was renamed before the first public release.
 
-## v1.0.2 UI and reliability update
+## v1.0.3 compact-layout update
 
-Version 1.0.2 refreshes the desktop experience with a dark card-based dashboard, a large battery/status header, clearer settings sections, improved diagnostics, and corrected IP2368 battery-mode reporting. It also fixes the `/etc/pi-batt` directory permissions required for atomic settings saves.
+Version 1.0.3 refines the desktop experience for smaller Raspberry Pi screens. It adds scrollable tabs, tighter spacing, more compact dashboard cards, improved button/form sizing, and a reorganized updater layout while preserving the dark Pi-Batt look introduced in v1.0.2.
 
 ## Hardware compatibility
 
@@ -92,8 +92,8 @@ On Linux:
 This creates:
 
 ```text
-dist/Pi-Batt-v1.0.2.zip
-dist/Pi-Batt-v1.0.2.zip.sha256
+dist/Pi-Batt-v1.0.3.zip
+dist/Pi-Batt-v1.0.3.zip.sha256
 ```
 
 Upload both files to the matching GitHub Release.
