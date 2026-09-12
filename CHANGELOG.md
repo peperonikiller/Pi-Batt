@@ -1,6 +1,14 @@
 # Changelog
 
+## 1.1.5
+- Add smooth animated battery percentage bar transitions using Qt property animation.
+- Preserve touch-friendly kinetic scrolling and compact-screen controls from the v1.1 work.
+- Include the full v1.1 battery intelligence feature set: pack profiling, health estimation, smarter ETA, Pi system monitoring, battery statistics, compact dashboard mode, and Copy Diagnostics.
+- Keep updater requests in persistent `/var/lib/pi-batt` storage to avoid reboot-time permissions failures.
+
 ## 1.1.0
+- Add touch-friendly kinetic scrolling: drag anywhere in scrollable tabs, event history, and release notes with a finger instead of grabbing the scrollbar.
+- Enable per-pixel scrolling and tab overflow buttons for compact touch displays.
 - Add configurable battery pack profile: cell mAh, series cells, parallel strings, and nominal cell voltage.
 - Calculate pack configuration, total pack mAh, nominal voltage, and nominal watt-hours.
 - Add a Health tab with estimated full-charge capacity, health percentage/state, capacity trend, cell balance, and cell high/low values.

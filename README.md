@@ -1,13 +1,15 @@
-# Pi-Batt v1.1.0
+# Pi-Batt v1.1.5
 
 Pi-Batt is a Raspberry Pi desktop + system service monitor for the Waveshare UPS HAT (E). It began as PiUPS and was renamed before the first public release.
 
-## v1.1.0 battery intelligence update
+## v1.1.5 touch and battery intelligence update
 
-Version 1.1.0 adds battery pack profiling, estimated battery health, smarter runtime estimates, Raspberry Pi system monitoring, expanded 30-day statistics, a compact-dashboard option, and one-click diagnostic copying. It keeps the small-screen layout work from v1.0.3 and also moves updater requests to persistent state storage so reboots no longer break update-request permissions.
+Version 1.1.5 adds smooth battery-bar animation and touch-friendly kinetic scrolling alongside battery pack profiling, estimated battery health, smarter runtime estimates, Raspberry Pi system monitoring, expanded 30-day statistics, a compact-dashboard option, and one-click diagnostic copying. It also keeps updater requests in persistent state storage so reboots do not break update-request permissions.
 
-### New in 1.1.0
+### New in 1.1.5
 
+- Smooth animated battery percentage bar instead of abrupt percentage jumps.
+- Touch-friendly kinetic scrolling: drag/swipe pages, event history, and release notes directly with a finger.
 - Configure cell capacity, series count, parallel strings, and nominal cell voltage.
 - Automatic pack calculations for S/P layout, pack mAh, nominal voltage, and Wh.
 - New Health tab with estimated full-charge capacity, health %, health state, capacity trend, cell balance, and high/low cell values.
@@ -107,8 +109,8 @@ On Linux:
 This creates:
 
 ```text
-dist/Pi-Batt-v1.1.0.zip
-dist/Pi-Batt-v1.1.0.zip.sha256
+dist/Pi-Batt-v1.1.5.zip
+dist/Pi-Batt-v1.1.5.zip.sha256
 ```
 
 Upload both files to the matching GitHub Release.

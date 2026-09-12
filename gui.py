@@ -10,13 +10,13 @@ import time
 import urllib.request
 from pathlib import Path
 
-from PyQt5.QtCore import Qt, QTimer, QPointF, QThread, pyqtSignal, QProcess, QLockFile
+from PyQt5.QtCore import Qt, QTimer, QPointF, QThread, pyqtSignal, QProcess, QLockFile, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFormLayout, QGridLayout, QGroupBox,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSpinBox, QDoubleSpinBox,
     QSystemTrayIcon, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget, QTextEdit, QProgressBar, QFrame, QScrollArea
+    QWidget, QTextEdit, QProgressBar, QFrame, QScrollArea, QScroller
 )
 
 CONFIG_PATH = Path("/etc/pi-batt/config.json")
@@ -361,6 +361,8 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
+        tabs.tabBar().setUsesScrollButtons(True)
+        tabs.tabBar().setElideMode(Qt.ElideRight)
         self.setCentralWidget(tabs)
 
         self.dashboard = QWidget()
@@ -412,11 +414,20 @@ class MainWindow(QMainWindow):
             self.auto_update_timer.start(hours * 3600 * 1000)
 
     @staticmethod
+    def enable_touch_scroll(scroll_widget):
+        """Enable finger-drag kinetic scrolling without requiring the scrollbar."""
+        viewport = scroll_widget.viewport() if hasattr(scroll_widget, "viewport") else scroll_widget
+        viewport.setAttribute(Qt.WA_AcceptTouchEvents, True)
+        QScroller.grabGesture(viewport, QScroller.LeftMouseButtonGesture)
+
+    @staticmethod
     def wrap_scroll(widget):
         area = QScrollArea()
         area.setWidgetResizable(True)
         area.setFrameShape(QFrame.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         area.setWidget(widget)
+        MainWindow.enable_touch_scroll(area)
         return area
 
     def metric_value_label(self, large=False):
@@ -761,6 +772,12 @@ class MainWindow(QMainWindow):
         self.battery_bar.setObjectName("batteryBar")
         self.battery_bar.setRange(0, 100)
         self.battery_bar.setTextVisible(False)
+        self.battery_bar.setValue(0)
+        self.battery_anim = QPropertyAnimation(self.battery_bar, b"value", self)
+        self.battery_anim.setDuration(650)
+        self.battery_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._battery_display_value = 0
+        self._battery_first_update = True
 
         hero_l.addWidget(kicker, 0, 0)
         hero_l.addWidget(self.mode, 0, 1, 1, 2, Qt.AlignRight)
@@ -1014,6 +1031,9 @@ class MainWindow(QMainWindow):
         self.events.setHorizontalHeaderLabels(["Time", "Event", "Details"])
         self.events.horizontalHeader().setStretchLastSection(True)
         self.events.setMinimumHeight(240)
+        self.events.setVerticalScrollMode(QTableWidget.ScrollPerPixel)
+        self.events.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
+        self.enable_touch_scroll(self.events)
         root.addWidget(self.events)
         diag_buttons = QHBoxLayout()
         b = QPushButton("Refresh diagnostics")
@@ -1081,6 +1101,7 @@ class MainWindow(QMainWindow):
         self.release_notes.setReadOnly(True)
         self.release_notes.setPlaceholderText("Release notes will appear here after checking GitHub.")
         self.release_notes.setMinimumHeight(220)
+        self.enable_touch_scroll(self.release_notes)
         root.addWidget(self.release_notes)
 
         note = QLabel(
@@ -1224,7 +1245,7 @@ class MainWindow(QMainWindow):
 
         self.percent.setText(f"{pct}%")
         self.mode.setText(mode)
-        self.battery_bar.setValue(pct)
+        self.animate_battery_bar(pct)
         bar_color = "#48d597" if pct > 20 else "#f6bd4b" if pct > 10 else "#ff6b6b"
         self.battery_bar.setStyleSheet(f"QProgressBar#batteryBar::chunk {{ background: {bar_color}; border-radius: 6px; }}")
 
@@ -1300,6 +1321,29 @@ class MainWindow(QMainWindow):
         if time.time() - self.last_health_refresh >= 15:
             self.refresh_health(d)
             self.last_health_refresh = time.time()
+
+    def animate_battery_bar(self, target):
+        """Smoothly animate the battery fill instead of snapping between percentages."""
+        target = max(0, min(100, int(target)))
+        if self._battery_first_update:
+            self.battery_anim.stop()
+            self.battery_bar.setValue(target)
+            self._battery_display_value = target
+            self._battery_first_update = False
+            return
+
+        current = self.battery_bar.value()
+        if current == target:
+            self._battery_display_value = target
+            return
+
+        self.battery_anim.stop()
+        self.battery_anim.setStartValue(current)
+        self.battery_anim.setEndValue(target)
+        # Larger jumps get a little more time, but stay responsive on touch screens.
+        self.battery_anim.setDuration(min(950, 420 + abs(target - current) * 18))
+        self.battery_anim.start()
+        self._battery_display_value = target
 
     def _history_seconds(self):
         return [86400, 7 * 86400, 30 * 86400, 90 * 86400][self.range.currentIndex()]
