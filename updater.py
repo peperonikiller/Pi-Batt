@@ -152,23 +152,39 @@ def merge_config(default_path):
     os.chmod(CONFIG_PATH, 0o664)
 
 
+def prune_backups(keep=3):
+    if not BACKUP_DIR.exists():
+        return
+    backups=sorted((p for p in BACKUP_DIR.iterdir() if p.is_dir()), key=lambda p:p.stat().st_mtime, reverse=True)
+    for old in backups[keep:]:
+        shutil.rmtree(old, ignore_errors=True)
+
+
 def apply_payload(payload, version):
     if os.geteuid() != 0:
         raise PermissionError("Update installation must run as root")
 
     write_status("installing", f"Installing Pi-Batt v{version}", version=version)
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup = None
     if INSTALL_DIR.exists():
         old_ver = current_version()
         stamp = time.strftime("%Y%m%d-%H%M%S")
         backup = BACKUP_DIR / f"v{old_ver}-{stamp}"
         shutil.copytree(INSTALL_DIR, backup, dirs_exist_ok=True)
+        prune_backups(keep=3)
 
-    INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-    for name in ["daemon.py", "gui.py", "pibatt_hw.py", "pibattctl.py", "updater.py", "VERSION", "manifest.json"]:
-        shutil.copy2(payload / name, INSTALL_DIR / name)
-    for py in INSTALL_DIR.glob("*.py"):
-        os.chmod(py, 0o755)
+    try:
+        INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+        for name in ["daemon.py", "gui.py", "pibatt_hw.py", "pibattctl.py", "updater.py", "VERSION", "manifest.json"]:
+            shutil.copy2(payload / name, INSTALL_DIR / name)
+        for py in INSTALL_DIR.glob("*.py"):
+            os.chmod(py, 0o755)
+    except Exception:
+        if backup and backup.exists():
+            shutil.rmtree(INSTALL_DIR, ignore_errors=True)
+            shutil.copytree(backup, INSTALL_DIR, dirs_exist_ok=True)
+        raise
 
     shutil.copy2(payload / "pi-batt-launch", "/usr/local/bin/pi-batt")
     os.chmod("/usr/local/bin/pi-batt", 0o755)

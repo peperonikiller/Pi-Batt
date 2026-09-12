@@ -222,14 +222,20 @@ def main():
                 current_samples.append(d["battery_current_ma"])
                 avg_current = sum(current_samples) / len(current_samples)
                 d["rolling_battery_current_ma"] = round(avg_current, 1)
+                # Signed battery power: positive while charging, negative while discharging.
+                d["battery_power_mw"] = int((d["battery_voltage_mv"] * d["battery_current_ma"]) / 1000)
                 calculated_eta = None
                 if avg_current < -50 and d["remaining_capacity_mah"] > 0:
                     calculated_eta = int((d["remaining_capacity_mah"] / abs(avg_current)) * 60)
                 d["calculated_discharge_min"] = calculated_eta
 
                 native_eta = d["remaining_charge_min"] if d["charging"] else d["remaining_discharge_min"]
+                d["eta_source"] = "native"
                 if not d["charging"] and native_eta is None:
                     native_eta = calculated_eta
+                    d["eta_source"] = "calculated" if calculated_eta is not None else "unavailable"
+                elif native_eta is None:
+                    d["eta_source"] = "unavailable"
                 d["eta_minutes"] = native_eta
                 d["eta_text"] = fmt_eta(native_eta)
                 d["mode"] = "Charging" if d["charging"] else ("On AC" if stable_vbus else "On battery")

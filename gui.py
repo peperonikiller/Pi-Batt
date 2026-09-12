@@ -9,7 +9,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-from PyQt5.QtCore import Qt, QTimer, QPointF, QThread, pyqtSignal, QProcess
+from PyQt5.QtCore import Qt, QTimer, QPointF, QThread, pyqtSignal, QProcess, QLockFile
 from PyQt5.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QFont
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFormLayout, QGridLayout, QGroupBox,
@@ -187,6 +187,11 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self); self.timer.timeout.connect(self.refresh); self.timer.start(2000)
         self.history_timer = QTimer(self); self.history_timer.timeout.connect(self.refresh_history); self.history_timer.start(30000)
         self.refresh(); self.refresh_history()
+        # Treat any updater result that predates this GUI process as already acknowledged.
+        # This prevents an installed-status file from causing an endless restart prompt.
+        self.startup_update_status = read_json(UPDATE_STATUS_PATH, {}) or {}
+        self.last_update_stamp = self.startup_update_status.get("timestamp", 0)
+        self.apply_startup_update_status()
         self.update_poll_timer = QTimer(self); self.update_poll_timer.timeout.connect(self.poll_update_status); self.update_poll_timer.start(1500)
         cfg = read_json(CONFIG_PATH, DEFAULT_CONFIG.copy()) or DEFAULT_CONFIG.copy()
         if cfg.get("auto_update_check", True):
@@ -208,8 +213,9 @@ class MainWindow(QMainWindow):
         grid = QGridLayout(); root.addLayout(grid)
         labels = [
             ("ETA", "eta"), ("Battery voltage", "batt_v"), ("Battery current", "batt_i"),
-            ("Remaining capacity", "capacity"), ("USB-C voltage", "vbus_v"), ("USB-C current", "vbus_i"),
-            ("USB-C power", "vbus_p"), ("Cell delta", "delta")
+            ("Battery power", "batt_p"), ("Remaining capacity", "capacity"), ("USB-C voltage", "vbus_v"),
+            ("USB-C current", "vbus_i"), ("USB-C power", "vbus_p"), ("Cell delta", "delta"),
+            ("Rolling current", "rolling_i"), ("ETA source", "eta_source"), ("Last sample", "sample_age")
         ]
         self.metrics = {}
         for idx,(name,key) in enumerate(labels):
@@ -226,7 +232,7 @@ class MainWindow(QMainWindow):
         root=QVBoxLayout(self.history)
         row=QHBoxLayout(); root.addLayout(row)
         self.range=QComboBox(); self.range.addItems(["24 hours","7 days","30 days","90 days"]); self.range.currentIndexChanged.connect(self.refresh_history)
-        self.series=QComboBox(); self.series.addItems(["Battery %","Battery voltage","Battery current","Input power","Cell delta"]); self.series.currentIndexChanged.connect(self.refresh_history)
+        self.series=QComboBox(); self.series.addItems(["Battery %","Battery voltage","Battery current","Battery power","Input power","Cell delta"]); self.series.currentIndexChanged.connect(self.refresh_history)
         row.addWidget(QLabel("Range:")); row.addWidget(self.range); row.addSpacing(20); row.addWidget(QLabel("Metric:")); row.addWidget(self.series); row.addStretch()
         self.chart=MiniChart(); root.addWidget(self.chart)
 
@@ -236,6 +242,7 @@ class MainWindow(QMainWindow):
         self.s_warning=QSpinBox(); self.s_warning.setRange(1,99); self.s_warning.setValue(int(cfg.get("warning_percent",20)))
         self.s_critical=QSpinBox(); self.s_critical.setRange(1,99); self.s_critical.setValue(int(cfg.get("critical_percent",10)))
         self.s_shutdown=QSpinBox(); self.s_shutdown.setRange(1,50); self.s_shutdown.setValue(int(cfg.get("shutdown_percent",5)))
+        self.s_confirm=QSpinBox(); self.s_confirm.setRange(5,300); self.s_confirm.setSuffix(" s"); self.s_confirm.setValue(int(cfg.get("shutdown_confirm_seconds",20)))
         self.s_countdown=QSpinBox(); self.s_countdown.setRange(10,600); self.s_countdown.setSuffix(" s"); self.s_countdown.setValue(int(cfg.get("shutdown_countdown_seconds",60)))
         self.s_cell=QSpinBox(); self.s_cell.setRange(2600,3600); self.s_cell.setSuffix(" mV"); self.s_cell.setValue(int(cfg.get("emergency_cell_mv",3000)))
         self.s_retention=QSpinBox(); self.s_retention.setRange(1,3650); self.s_retention.setSuffix(" days"); self.s_retention.setValue(int(cfg.get("history_retention_days",90)))
@@ -243,22 +250,38 @@ class MainWindow(QMainWindow):
         self.s_cut=QCheckBox("Arm HAT power-cut timer immediately before Linux poweroff"); self.s_cut.setChecked(bool(cfg.get("trigger_hat_power_cut",False)))
         self.s_autostart=QCheckBox("Auto-start Pi when external power returns"); self.s_autostart.setChecked(bool(cfg.get("auto_start_on_power",True)))
         form.addRow("Low battery warning", self.s_warning); form.addRow("Critical warning", self.s_critical); form.addRow("Shutdown threshold", self.s_shutdown)
-        form.addRow("Shutdown countdown", self.s_countdown); form.addRow("Emergency minimum cell", self.s_cell); form.addRow("Keep history", self.s_retention)
+        form.addRow("Low condition confirmation", self.s_confirm); form.addRow("Shutdown countdown", self.s_countdown); form.addRow("Emergency minimum cell", self.s_cell); form.addRow("Keep history", self.s_retention)
         self.s_auto_update=QCheckBox("Automatically check GitHub for Pi-Batt updates"); self.s_auto_update.setChecked(bool(cfg.get("auto_update_check",True)))
         form.addRow(self.s_shutdown_enable); form.addRow(self.s_cut); form.addRow(self.s_autostart); form.addRow(self.s_auto_update)
         note=QLabel("Safety: HAT power-cut is off by default. Waveshare's 0x55 command schedules an irreversible power cut ~30 seconds later. Enable it only after normal shutdown testing succeeds."); note.setWordWrap(True); root.addWidget(note)
-        btn=QPushButton("Save settings"); btn.clicked.connect(self.save_settings); root.addWidget(btn); root.addStretch()
+        buttons=QHBoxLayout(); root.addLayout(buttons)
+        btn=QPushButton("Save settings"); btn.clicked.connect(self.save_settings); buttons.addWidget(btn)
+        test_btn=QPushButton("Test notification"); test_btn.clicked.connect(lambda: self.tray.showMessage("Pi-Batt test", "Desktop notifications are working.", QSystemTrayIcon.Information, 5000)); buttons.addWidget(test_btn)
+        buttons.addStretch(); root.addStretch()
 
     def build_diag(self):
         root=QVBoxLayout(self.diag)
         self.diag_labels={}
         form=QFormLayout(); root.addLayout(form)
-        for name,key in [("Connection","connected"),("Firmware","firmware"),("BQ4050","bq"),("IP2368","ip"),("Auto-start","auto"),("Charge state","charge"),("I²C ID","id")]:
+        for name,key in [("Connection","connected"),("Firmware","firmware"),("BQ4050","bq"),("IP2368","ip"),("Auto-start","auto"),("Charge state","charge"),("I²C ID","id"),("Outages (24h)","outages24"),("Longest outage (7d)","longest7"),("Current outage","current_outage")]:
             l=QLabel("—"); self.diag_labels[key]=l; form.addRow(name,l)
         root.addWidget(QLabel("Recent events"))
         self.events=QTableWidget(0,3); self.events.setHorizontalHeaderLabels(["Time","Event","Details"]); self.events.horizontalHeader().setStretchLastSection(True); root.addWidget(self.events)
         b=QPushButton("Refresh diagnostics"); b.clicked.connect(self.refresh_events); root.addWidget(b)
         self.refresh_events()
+
+    def apply_startup_update_status(self):
+        d = getattr(self, "startup_update_status", {}) or {}
+        state = d.get("state")
+        msg = d.get("message")
+        if not state or not msg:
+            return
+        # On a freshly restarted GUI, show the previous result as informational state only.
+        # Never ask for another restart for the same completed update.
+        self.update_state.setText(msg)
+        if state == "installed":
+            ver = d.get("version", APP_VERSION)
+            self.update_latest.setText(f"Installed successfully: v{ver}")
 
     def build_updates(self):
         root=QVBoxLayout(self.updates)
@@ -327,6 +350,8 @@ class MainWindow(QMainWindow):
         self.last_update_stamp=stamp
         state=d.get("state","unknown"); msg=d.get("message",state)
         self.update_state.setText(msg)
+        busy = state in ("downloading", "installing")
+        self.btn_check.setEnabled(not busy); self.btn_verify.setEnabled(not busy); self.btn_reinstall.setEnabled(not busy)
         if state == "installed":
             version=d.get("version","new version")
             if QMessageBox.question(self,"Pi-Batt updated",f"Pi-Batt {version} was installed successfully.\n\nRestart the Pi-Batt tray app now?",QMessageBox.Yes|QMessageBox.No)==QMessageBox.Yes:
@@ -338,10 +363,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self,"Pi-Batt update failed",msg)
 
     def save_settings(self):
+        if not (self.s_warning.value() > self.s_critical.value() > self.s_shutdown.value()):
+            QMessageBox.warning(self, "Pi-Batt settings", "Thresholds must be ordered as: low warning > critical warning > shutdown threshold.")
+            return
         cfg=read_json(CONFIG_PATH, DEFAULT_CONFIG.copy()) or DEFAULT_CONFIG.copy()
         cfg.update({
             "warning_percent":self.s_warning.value(), "critical_percent":self.s_critical.value(), "shutdown_percent":self.s_shutdown.value(),
-            "shutdown_countdown_seconds":self.s_countdown.value(), "emergency_cell_mv":self.s_cell.value(), "history_retention_days":self.s_retention.value(),
+            "shutdown_confirm_seconds":self.s_confirm.value(), "shutdown_countdown_seconds":self.s_countdown.value(), "emergency_cell_mv":self.s_cell.value(), "history_retention_days":self.s_retention.value(),
             "shutdown_enabled":self.s_shutdown_enable.isChecked(), "trigger_hat_power_cut":self.s_cut.isChecked(), "auto_start_on_power":self.s_autostart.isChecked(),
             "auto_update_check":self.s_auto_update.isChecked()
         })
@@ -364,11 +392,15 @@ class MainWindow(QMainWindow):
         self.metrics["eta"].setText(human_eta(d.get("eta_minutes")))
         self.metrics["batt_v"].setText(f"{d.get('battery_voltage_mv',0)/1000:.3f} V")
         self.metrics["batt_i"].setText(f"{d.get('battery_current_ma',0)/1000:+.3f} A")
+        self.metrics["batt_p"].setText(f"{d.get('battery_power_mw',0)/1000:+.2f} W")
         self.metrics["capacity"].setText(f"{d.get('remaining_capacity_mah',0)} mAh")
         self.metrics["vbus_v"].setText(f"{d.get('vbus_voltage_mv',0)/1000:.3f} V")
         self.metrics["vbus_i"].setText(f"{d.get('vbus_current_ma',0)/1000:+.3f} A")
         self.metrics["vbus_p"].setText(f"{d.get('vbus_power_mw',0)/1000:.2f} W")
         self.metrics["delta"].setText(f"{d.get('cell_delta_mv',0)} mV")
+        self.metrics["rolling_i"].setText(f"{d.get('rolling_battery_current_ma',0)/1000:+.3f} A")
+        self.metrics["eta_source"].setText(str(d.get("eta_source","—")).title())
+        age=max(0, int(time.time()-float(d.get("timestamp",time.time())))); self.metrics["sample_age"].setText(f"{age} s ago")
         for i,v in enumerate(d.get("cells_mv",[0,0,0,0])): self.cell_labels[i].setText(f"{v/1000:.3f} V")
         if d.get("shutdown_pending"):
             self.shutdown_banner.setText(f"⚠ Automatic shutdown in {d.get('shutdown_countdown',0)} seconds — reconnect external power to cancel")
@@ -409,16 +441,26 @@ class MainWindow(QMainWindow):
             "Battery %":("battery_percent",1,"Battery %",0,100),
             "Battery voltage":("battery_voltage_mv",0.001,"Battery voltage (V)",12,17),
             "Battery current":("battery_current_ma",0.001,"Battery current (A)",-6,6),
+            "Battery power":(None,1,"Battery power (W)",-80,80),
             "Input power":("vbus_power_mw",0.001,"USB-C input power (W)",0,45),
             "Cell delta":("cell_delta_mv",1,"Cell imbalance (mV)",0,150),
         }[metric]
         try:
             con=sqlite3.connect(f"file:{DB_PATH}?mode=ro",uri=True)
-            rows=con.execute(f"SELECT ts,{col} FROM samples WHERE ts>=? ORDER BY ts",(int(time.time())-self._history_seconds(),)).fetchall(); con.close()
+            cutoff=int(time.time())-self._history_seconds()
+            if metric == "Battery power":
+                raw=con.execute("SELECT ts,battery_voltage_mv,battery_current_ma FROM samples WHERE ts>=? ORDER BY ts",(cutoff,)).fetchall()
+                rows=[(ts,(v*i)/1000000.0) for ts,v,i in raw if v is not None and i is not None]
+                scale=1
+            else:
+                rows=con.execute(f"SELECT ts,{col} FROM samples WHERE ts>=? ORDER BY ts",(cutoff,)).fetchall()
+            con.close()
             if len(rows)>700:
                 step=math.ceil(len(rows)/700); rows=rows[::step]
             pts=[(float(x),float(y)*scale) for x,y in rows if y is not None]
-            if pts and metric not in ("Battery %","Battery voltage","Battery current","Input power","Cell delta"):
+            if pts and metric == "Battery power":
+                vals=[y for _,y in pts]; pad=max(1.0,(max(vals)-min(vals))*0.15); ymin=min(vals)-pad; ymax=max(vals)+pad
+            elif pts and metric not in ("Battery %","Battery voltage","Battery current","Input power","Cell delta"):
                 vals=[y for _,y in pts]; ymin,ymax=min(vals),max(vals)
             self.chart.set_data(pts,ymin,ymax,title)
         except Exception:
@@ -433,6 +475,21 @@ class MainWindow(QMainWindow):
             for r,(ts,typ,details) in enumerate(rows):
                 vals=[time.strftime("%Y-%m-%d %H:%M:%S",time.localtime(ts)),typ,details or ""]
                 for c,v in enumerate(vals): self.events.setItem(r,c,QTableWidgetItem(str(v)))
+            ev=con=None
+            con=sqlite3.connect(f"file:{DB_PATH}?mode=ro",uri=True)
+            ev=con.execute("SELECT ts,event_type FROM events WHERE event_type IN ('mains_lost','mains_restored') ORDER BY ts").fetchall(); con.close()
+            now=int(time.time()); outages=[]; open_start=None
+            for ts,typ in ev:
+                if typ=='mains_lost': open_start=ts
+                elif typ=='mains_restored' and open_start is not None:
+                    outages.append((open_start,ts)); open_start=None
+            count24=sum(1 for a,b in outages if a>=now-86400) + (1 if open_start and open_start>=now-86400 else 0)
+            durations=[b-a for a,b in outages if b>=now-7*86400]
+            if open_start and open_start>=now-7*86400: durations.append(now-open_start)
+            longest=max(durations) if durations else 0
+            self.diag_labels['outages24'].setText(str(count24))
+            self.diag_labels['longest7'].setText(human_eta(longest//60) if longest else '—')
+            self.diag_labels['current_outage'].setText(human_eta((now-open_start)//60) if open_start else 'No')
         except Exception:
             pass
 
@@ -455,6 +512,11 @@ class Tray(QSystemTrayIcon):
 
 def main():
     app=QApplication(sys.argv); app.setApplicationName("Pi-Batt"); app.setQuitOnLastWindowClosed(False)
+    runtime=os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    lock=QLockFile(os.path.join(runtime, f"pi-batt-{os.getuid()}.lock")); lock.setStaleLockTime(0)
+    if not lock.tryLock(100):
+        return 0
+    app._pi_batt_lock=lock
     tray=Tray(app)
     # Show the window on first run / manual launch; autostart can pass --tray.
     if "--tray" not in sys.argv: tray.open()
