@@ -1,10 +1,24 @@
-# Pi-Batt v1.0.3
+# Pi-Batt v1.1.0
 
 Pi-Batt is a Raspberry Pi desktop + system service monitor for the Waveshare UPS HAT (E). It began as PiUPS and was renamed before the first public release.
 
-## v1.0.3 compact-layout update
+## v1.1.0 battery intelligence update
 
-Version 1.0.3 refines the desktop experience for smaller Raspberry Pi screens. It adds scrollable tabs, tighter spacing, more compact dashboard cards, improved button/form sizing, and a reorganized updater layout while preserving the dark Pi-Batt look introduced in v1.0.2.
+Version 1.1.0 adds battery pack profiling, estimated battery health, smarter runtime estimates, Raspberry Pi system monitoring, expanded 30-day statistics, a compact-dashboard option, and one-click diagnostic copying. It keeps the small-screen layout work from v1.0.3 and also moves updater requests to persistent state storage so reboots no longer break update-request permissions.
+
+### New in 1.1.0
+
+- Configure cell capacity, series count, parallel strings, and nominal cell voltage.
+- Automatic pack calculations for S/P layout, pack mAh, nominal voltage, and Wh.
+- New Health tab with estimated full-charge capacity, health %, health state, capacity trend, cell balance, and high/low cell values.
+- Raspberry Pi CPU temperature, load, RAM usage, and throttling/undervoltage flags.
+- HAT-native ETA and independent Pi-Batt runtime ETA shown side-by-side.
+- 30-day average charge/discharge power, minimum battery %, maximum cell spread, total outage time, and longest outage.
+- Optional compact dashboard mode for very small screens.
+- Copy Diagnostics button for quick troubleshooting reports.
+- Updater requests now use `/var/lib/pi-batt/update-request.json` instead of `/run`, avoiding reboot-time permission loss.
+
+Battery-health values are estimates based on the configured design capacity and BQ4050-reported remaining capacity. They are intended as a trend/maintenance aid rather than a laboratory state-of-health measurement.
 
 ## Hardware compatibility
 
@@ -42,6 +56,7 @@ Installed locations:
 - `/etc/pi-batt/config.json` — settings
 - `/var/lib/pi-batt/history.db` — history
 - `/run/pi-batt/status.json` — live UPS state
+- `/var/lib/pi-batt/update-request.json` — narrow GUI-to-service updater request
 - `/usr/local/bin/pi-batt` — Wayland-aware GUI launcher
 - `/usr/local/bin/pi-battctl` — CLI status helper
 - `pi-batt.service` — root background monitor
@@ -79,7 +94,7 @@ Every public stable release must include these two assets with matching version 
 
 The ZIP must contain `manifest.json` and `VERSION`. The updater refuses to install a package when the checksum, product name, version, or required payload files do not match.
 
-The GUI itself never installs files as root. It writes a narrow update request to `/run/pi-batt/update-request.json`. The root monitoring daemon accepts only three fixed actions—verify latest, install latest, or reinstall latest—and launches the updater in a separate transient systemd unit. Arbitrary URLs or shell commands are not accepted.
+The GUI itself never installs files as root. It writes a narrow update request to `/var/lib/pi-batt/update-request.json`. The root monitoring daemon accepts only three fixed actions—verify latest, install latest, or reinstall latest—and launches the updater in a separate transient systemd unit. Arbitrary URLs or shell commands are not accepted.
 
 ## Build release assets
 
@@ -92,8 +107,8 @@ On Linux:
 This creates:
 
 ```text
-dist/Pi-Batt-v1.0.3.zip
-dist/Pi-Batt-v1.0.3.zip.sha256
+dist/Pi-Batt-v1.1.0.zip
+dist/Pi-Batt-v1.1.0.zip.sha256
 ```
 
 Upload both files to the matching GitHub Release.

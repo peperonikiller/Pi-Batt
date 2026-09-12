@@ -3,6 +3,8 @@ import json
 import math
 import os
 import sqlite3
+import statistics
+import subprocess
 import sys
 import time
 import urllib.request
@@ -12,7 +14,7 @@ from PyQt5.QtCore import Qt, QTimer, QPointF, QThread, pyqtSignal, QProcess, QLo
 from PyQt5.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFormLayout, QGridLayout, QGroupBox,
-    QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSpinBox,
+    QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSpinBox, QDoubleSpinBox,
     QSystemTrayIcon, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
     QWidget, QTextEdit, QProgressBar, QFrame, QScrollArea
 )
@@ -26,7 +28,7 @@ try:
 except Exception:
     APP_VERSION = "1.0.0"
 GITHUB_REPO = "peperonikiller/Pi-Batt"
-UPDATE_REQUEST_PATH = Path("/run/pi-batt/update-request.json")
+UPDATE_REQUEST_PATH = Path("/var/lib/pi-batt/update-request.json")
 UPDATE_STATUS_PATH = Path("/run/pi-batt/update-status.json")
 
 DEFAULT_CONFIG = {
@@ -36,7 +38,9 @@ DEFAULT_CONFIG = {
     "trigger_hat_power_cut": False, "auto_start_on_power": True,
     "history_interval_seconds": 15, "history_retention_days": 90,
     "poll_seconds": 2, "event_debounce_seconds": 6,
-    "auto_update_check": True, "update_check_hours": 6
+    "auto_update_check": True, "update_check_hours": 6,
+    "cell_capacity_mah": 5000, "series_cells": 4, "parallel_strings": 1,
+    "nominal_cell_voltage_v": 3.7, "compact_dashboard": False
 }
 
 
@@ -178,7 +182,7 @@ QPushButton:pressed { background: #19293d; }
 QPushButton:disabled { color: #64758b; background: #172231; border-color: #26364a; }
 QPushButton#primaryButton { background: #1579a8; border-color: #38bdf8; }
 QPushButton#primaryButton:hover { background: #188dbf; }
-QSpinBox, QComboBox, QTextEdit {
+QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit {
     background: #101a28;
     border: 1px solid #31445d;
     border-radius: 7px;
@@ -187,8 +191,8 @@ QSpinBox, QComboBox, QTextEdit {
     color: #e4edf7;
     selection-background-color: #237ca7;
 }
-QSpinBox:focus, QComboBox:focus, QTextEdit:focus { border-color: #42c6ff; }
-QSpinBox::up-button, QSpinBox::down-button {
+QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QTextEdit:focus { border-color: #42c6ff; }
+QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
     width: 18px;
     border-left: 1px solid #31445d;
     background: #18263a;
@@ -350,6 +354,7 @@ class MainWindow(QMainWindow):
         self.last = None
         self.prev_vbus = None
         self.prev_warning = "normal"
+        self.last_health_refresh = 0
         self.setWindowTitle(f"Pi-Batt v{APP_VERSION}")
         self.resize(900, 560)
         self.setMinimumSize(680, 420)
@@ -359,18 +364,21 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(tabs)
 
         self.dashboard = QWidget()
+        self.health = QWidget()
         self.history = QWidget()
         self.settings = QWidget()
         self.diag = QWidget()
         self.updates = QWidget()
 
         tabs.addTab(self.wrap_scroll(self.dashboard), "Dashboard")
+        tabs.addTab(self.wrap_scroll(self.health), "Health")
         tabs.addTab(self.wrap_scroll(self.history), "History")
         tabs.addTab(self.wrap_scroll(self.settings), "Settings")
         tabs.addTab(self.wrap_scroll(self.diag), "Diagnostics")
         tabs.addTab(self.wrap_scroll(self.updates), "Updates")
 
         self.build_dashboard()
+        self.build_health()
         self.build_history()
         self.build_settings()
         self.build_diag()
@@ -432,6 +440,295 @@ class MainWindow(QMainWindow):
         self.metrics[key] = value_lab
         return card
 
+    def pack_config(self):
+        cfg = read_json(CONFIG_PATH, DEFAULT_CONFIG.copy()) or DEFAULT_CONFIG.copy()
+        cell_mah = max(1, int(cfg.get("cell_capacity_mah", 5000)))
+        series = max(1, int(cfg.get("series_cells", 4)))
+        parallel = max(1, int(cfg.get("parallel_strings", 1)))
+        nominal_v = max(0.1, float(cfg.get("nominal_cell_voltage_v", 3.7)))
+        pack_mah = cell_mah * parallel
+        pack_v = nominal_v * series
+        pack_wh = pack_mah / 1000.0 * pack_v
+        return {
+            "cell_mah": cell_mah, "series": series, "parallel": parallel,
+            "nominal_v": nominal_v, "pack_mah": pack_mah,
+            "pack_v": pack_v, "pack_wh": pack_wh,
+            "label": f"{series}S{parallel}P",
+            "compact": bool(cfg.get("compact_dashboard", False)),
+        }
+
+    def system_stats(self):
+        temp_c = None
+        for path in (Path("/sys/class/thermal/thermal_zone0/temp"), Path("/sys/devices/virtual/thermal/thermal_zone0/temp")):
+            try:
+                temp_c = float(path.read_text().strip()) / 1000.0
+                break
+            except Exception:
+                pass
+        load = None
+        try:
+            load = float(Path("/proc/loadavg").read_text().split()[0])
+        except Exception:
+            pass
+        mem_used = mem_total = None
+        try:
+            info = {}
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    info[k] = int(v.strip().split()[0])
+            mem_total = info.get("MemTotal")
+            avail = info.get("MemAvailable")
+            if mem_total and avail is not None:
+                mem_used = max(0, mem_total - avail)
+        except Exception:
+            pass
+        throttled = None
+        try:
+            out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True, text=True, timeout=1).stdout.strip()
+            if "=" in out:
+                throttled = int(out.split("=", 1)[1], 16)
+        except Exception:
+            pass
+        return {"temp_c": temp_c, "load": load, "mem_used": mem_used, "mem_total": mem_total, "throttled": throttled}
+
+    def estimate_health(self, current=None):
+        pack = self.pack_config()
+        design = float(pack["pack_mah"])
+        inferred = []
+        try:
+            con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+            cutoff = int(time.time()) - 90 * 86400
+            rows = con.execute(
+                "SELECT ts,battery_percent,remaining_capacity_mah FROM samples "
+                "WHERE ts>=? AND battery_percent>=20 AND remaining_capacity_mah>0 ORDER BY ts",
+                (cutoff,)
+            ).fetchall()
+            con.close()
+            for ts, pct, rem in rows:
+                if pct and 20 <= pct <= 100:
+                    est = float(rem) * 100.0 / float(pct)
+                    if design * 0.45 <= est <= design * 1.30:
+                        inferred.append((ts, est))
+        except Exception:
+            pass
+        if current:
+            pct = float(current.get("battery_percent", 0) or 0)
+            rem = float(current.get("remaining_capacity_mah", 0) or 0)
+            if pct >= 20 and rem > 0:
+                est = rem * 100.0 / pct
+                if design * 0.45 <= est <= design * 1.30:
+                    inferred.append((int(time.time()), est))
+        full_est = statistics.median(v for _, v in inferred[-500:]) if inferred else None
+        health = (full_est / design * 100.0) if full_est and design else None
+        if health is None:
+            state = "Learning"
+        elif health >= 90:
+            state = "Excellent"
+        elif health >= 80:
+            state = "Good"
+        elif health >= 70:
+            state = "Fair"
+        else:
+            state = "Replace soon"
+        trend = "Learning"
+        if len(inferred) >= 20:
+            cut = max(5, len(inferred) // 4)
+            early = statistics.median(v for _, v in inferred[:cut])
+            late = statistics.median(v for _, v in inferred[-cut:])
+            delta = (late - early) / early * 100.0 if early else 0.0
+            if abs(delta) < 2.0:
+                trend = "Stable"
+            elif delta < 0:
+                trend = f"{delta:.1f}%"
+            else:
+                trend = f"+{delta:.1f}%"
+        return full_est, health, state, trend
+
+    def calculate_runtime_eta(self, d):
+        if not d or d.get("charging"):
+            return None
+        pack = self.pack_config()
+        remaining_mah = float(d.get("remaining_capacity_mah", 0) or 0)
+        rolling_ma = float(d.get("rolling_battery_current_ma", d.get("battery_current_ma", 0)) or 0)
+        voltage_v = float(d.get("battery_voltage_mv", 0) or 0) / 1000.0
+        if remaining_mah <= 0:
+            pct = float(d.get("battery_percent", 0) or 0)
+            remaining_mah = pack["pack_mah"] * max(0.0, min(100.0, pct)) / 100.0
+        watts = abs(voltage_v * rolling_ma / 1000.0)
+        remaining_wh = remaining_mah / 1000.0 * pack["pack_v"]
+        if watts < 0.5 or remaining_wh <= 0:
+            return None
+        return int(remaining_wh / watts * 60.0)
+
+    def build_health(self):
+        root = QVBoxLayout(self.health)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(12)
+        title = QLabel("Battery health & system")
+        title.setObjectName("sectionTitle")
+        root.addWidget(title)
+
+        self.health_labels = {}
+        pack_box = QGroupBox("Battery pack")
+        pg = QGridLayout(pack_box)
+        pack_items = [
+            ("Configuration", "pack_config"), ("Pack capacity", "pack_capacity"),
+            ("Nominal voltage", "pack_voltage"), ("Nominal energy", "pack_energy"),
+            ("Estimated full capacity", "full_capacity"), ("Estimated health", "health_pct"),
+            ("Health state", "health_state"), ("Capacity trend", "health_trend"),
+            ("Lowest cell", "low_cell"), ("Highest cell", "high_cell"),
+            ("Cell balance", "cell_balance"), ("Current spread", "cell_spread"),
+        ]
+        for idx, (name, key) in enumerate(pack_items):
+            card = QFrame(); card.setObjectName("metricCardFrame")
+            lay = QVBoxLayout(card); lay.setContentsMargins(10, 8, 10, 8); lay.setSpacing(3)
+            n = QLabel(name); n.setObjectName("metricTitle")
+            v = QLabel("—"); v.setObjectName("metricValue"); v.setAlignment(Qt.AlignCenter)
+            lay.addWidget(n); lay.addWidget(v)
+            self.health_labels[key] = v
+            pg.addWidget(card, idx // 3, idx % 3)
+        root.addWidget(pack_box)
+
+        self.system_labels = {}
+        sys_box = QGroupBox("Raspberry Pi system")
+        sg = QGridLayout(sys_box)
+        for idx, (name, key) in enumerate([
+            ("CPU temperature", "cpu_temp"), ("Load average", "load"),
+            ("RAM usage", "ram"), ("Power/throttle", "throttle"),
+        ]):
+            card = QFrame(); card.setObjectName("metricCardFrame")
+            lay = QVBoxLayout(card); lay.setContentsMargins(10, 8, 10, 8); lay.setSpacing(3)
+            n = QLabel(name); n.setObjectName("metricTitle")
+            v = QLabel("—"); v.setObjectName("metricValue"); v.setAlignment(Qt.AlignCenter)
+            lay.addWidget(n); lay.addWidget(v)
+            self.system_labels[key] = v
+            sg.addWidget(card, 0, idx)
+        root.addWidget(sys_box)
+
+        self.stat_labels = {}
+        stats_box = QGroupBox("30-day battery statistics")
+        stg = QGridLayout(stats_box)
+        for idx, (name, key) in enumerate([
+            ("Avg discharge", "avg_discharge"), ("Avg charging", "avg_charge"),
+            ("Lowest battery", "min_pct"), ("Max cell spread", "max_delta"),
+            ("Total outage time", "outage_total"), ("Longest outage", "outage_longest"),
+        ]):
+            card = QFrame(); card.setObjectName("metricCardFrame")
+            lay = QVBoxLayout(card); lay.setContentsMargins(10, 8, 10, 8); lay.setSpacing(3)
+            n = QLabel(name); n.setObjectName("metricTitle")
+            v = QLabel("—"); v.setObjectName("metricValue"); v.setAlignment(Qt.AlignCenter)
+            lay.addWidget(n); lay.addWidget(v)
+            self.stat_labels[key] = v
+            stg.addWidget(card, idx // 3, idx % 3)
+        root.addWidget(stats_box)
+        root.addStretch()
+
+    def refresh_health(self, d=None):
+        d = d or self.last or read_json(STATUS_PATH, {}) or {}
+        pack = self.pack_config()
+        self.health_labels["pack_config"].setText(pack["label"])
+        self.health_labels["pack_capacity"].setText(f"{pack['pack_mah']:,} mAh")
+        self.health_labels["pack_voltage"].setText(f"{pack['pack_v']:.1f} V")
+        self.health_labels["pack_energy"].setText(f"{pack['pack_wh']:.1f} Wh")
+        full_est, health, state, trend = self.estimate_health(d)
+        self.health_labels["full_capacity"].setText(f"{full_est:,.0f} mAh" if full_est else "Learning")
+        self.health_labels["health_pct"].setText(f"{health:.1f}%" if health is not None else "Learning")
+        self.health_labels["health_state"].setText(state)
+        self.health_labels["health_trend"].setText(trend)
+        cells = [int(v) for v in d.get("cells_mv", []) if v]
+        if cells:
+            lo, hi = min(cells), max(cells)
+            spread = hi - lo
+            balance = "Excellent" if spread < 30 else "Good" if spread < 60 else "Watch" if spread < 100 else "High imbalance"
+            self.health_labels["low_cell"].setText(f"{lo/1000:.3f} V")
+            self.health_labels["high_cell"].setText(f"{hi/1000:.3f} V")
+            self.health_labels["cell_balance"].setText(balance)
+            self.health_labels["cell_spread"].setText(f"{spread} mV")
+        stats = self.system_stats()
+        self.system_labels["cpu_temp"].setText(f"{stats['temp_c']:.1f} °C" if stats['temp_c'] is not None else "—")
+        self.system_labels["load"].setText(f"{stats['load']:.2f}" if stats['load'] is not None else "—")
+        if stats['mem_used'] is not None and stats['mem_total']:
+            pct = stats['mem_used'] / stats['mem_total'] * 100.0
+            self.system_labels["ram"].setText(f"{pct:.0f}%")
+        else:
+            self.system_labels["ram"].setText("—")
+        if stats['throttled'] is None:
+            self.system_labels["throttle"].setText("Unknown")
+        elif stats['throttled'] == 0:
+            self.system_labels["throttle"].setText("Normal")
+        else:
+            self.system_labels["throttle"].setText(f"Flags 0x{stats['throttled']:x}")
+        self.refresh_statistics()
+
+    def refresh_statistics(self):
+        if not DB_PATH.exists():
+            return
+        try:
+            con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+            cutoff = int(time.time()) - 30 * 86400
+            rows = con.execute(
+                "SELECT battery_voltage_mv,battery_current_ma,battery_percent,cell_delta_mv FROM samples WHERE ts>=?",
+                (cutoff,)
+            ).fetchall()
+            ev = con.execute(
+                "SELECT ts,event_type FROM events WHERE ts>=? AND event_type IN ('mains_lost','mains_restored') ORDER BY ts",
+                (cutoff,)
+            ).fetchall()
+            con.close()
+            discharge = [-(v * i) / 1000000.0 for v, i, _, _ in rows if v and i is not None and i < -50]
+            charge = [(v * i) / 1000000.0 for v, i, _, _ in rows if v and i is not None and i > 50]
+            pcts = [pct for _, _, pct, _ in rows if pct is not None]
+            deltas = [delta for _, _, _, delta in rows if delta is not None]
+            self.stat_labels["avg_discharge"].setText(f"{statistics.mean(discharge):.1f} W" if discharge else "—")
+            self.stat_labels["avg_charge"].setText(f"{statistics.mean(charge):.1f} W" if charge else "—")
+            self.stat_labels["min_pct"].setText(f"{min(pcts)}%" if pcts else "—")
+            self.stat_labels["max_delta"].setText(f"{max(deltas)} mV" if deltas else "—")
+            outages = []
+            start = None
+            now = int(time.time())
+            for ts, typ in ev:
+                if typ == "mains_lost":
+                    start = ts
+                elif typ == "mains_restored" and start is not None:
+                    outages.append(max(0, ts - start)); start = None
+            if start is not None:
+                outages.append(max(0, now - start))
+            total_min = sum(outages) // 60
+            longest_min = max(outages) // 60 if outages else 0
+            self.stat_labels["outage_total"].setText(human_eta(total_min) if outages else "—")
+            self.stat_labels["outage_longest"].setText(human_eta(longest_min) if outages else "—")
+        except Exception:
+            pass
+
+    def copy_diagnostics(self):
+        d = self.last or read_json(STATUS_PATH, {}) or {}
+        pack = self.pack_config()
+        sysinfo = self.system_stats()
+        lines = [
+            f"Pi-Batt v{APP_VERSION}",
+            f"UPS connected: {d.get('connected', False)}",
+            f"Mode: {d.get('mode', '—')}",
+            f"Battery: {d.get('battery_percent', '—')}% | {d.get('battery_voltage_mv', 0)/1000:.3f} V | {d.get('battery_current_ma', 0)/1000:+.3f} A",
+            f"Remaining capacity: {d.get('remaining_capacity_mah', '—')} mAh",
+            f"Cells: {' '.join(f'{v/1000:.3f}V' for v in d.get('cells_mv', []))}",
+            f"Cell delta: {d.get('cell_delta_mv', '—')} mV",
+            f"Input: {d.get('vbus_power_mw', 0)/1000:.2f} W",
+            f"Pack profile: {pack['label']} | {pack['pack_mah']} mAh | {pack['pack_v']:.1f} V | {pack['pack_wh']:.1f} Wh",
+            f"CPU temp: {sysinfo['temp_c']:.1f} C" if sysinfo['temp_c'] is not None else "CPU temp: —",
+            f"Throttle flags: 0x{sysinfo['throttled']:x}" if sysinfo['throttled'] is not None else "Throttle flags: unknown",
+            f"Firmware: V{d.get('software_version', '—')} | I2C ID: {hex(d.get('id', 0))}",
+            f"BQ4050: {'OK' if d.get('bq4050_ok') else 'ERROR'} | IP2368: {'Active' if d.get('ip2368_ok') else 'Idle/Check'}",
+        ]
+        QApplication.clipboard().setText("\n".join(lines))
+        QMessageBox.information(self, "Pi-Batt", "Diagnostics copied to the clipboard.")
+
+    def apply_compact_dashboard(self, compact):
+        if hasattr(self, "dashboard_secondary"):
+            self.dashboard_secondary.setVisible(not compact)
+        if hasattr(self, "cells_group"):
+            self.cells_group.setVisible(not compact)
+
     def build_dashboard(self):
         root = QVBoxLayout(self.dashboard)
         root.setContentsMargins(14, 14, 14, 14)
@@ -484,8 +781,10 @@ class MainWindow(QMainWindow):
         left_grid.setHorizontalSpacing(10)
         left_grid.setVerticalSpacing(10)
         left_metrics = [
-            ("ETA", "eta", True),
+            ("Best ETA", "eta", True),
             ("Remaining capacity", "capacity", True),
+            ("HAT ETA", "hat_eta", False),
+            ("Pi-Batt ETA", "smart_eta", False),
             ("Battery voltage", "batt_v", False),
             ("Battery current", "batt_i", False),
             ("Battery power", "batt_p", False),
@@ -509,10 +808,12 @@ class MainWindow(QMainWindow):
         for idx, (title, key, large) in enumerate(right_metrics):
             right_grid.addWidget(self.create_metric_card(title, key, large), idx // 2, idx % 2)
 
+        self.dashboard_secondary = right_box
         columns.addWidget(left_box, 1)
         columns.addWidget(right_box, 1)
 
         cells = QGroupBox("Cell voltages")
+        self.cells_group = cells
         cgrid = QGridLayout(cells)
         cgrid.setHorizontalSpacing(10)
         cgrid.setVerticalSpacing(10)
@@ -531,6 +832,7 @@ class MainWindow(QMainWindow):
             clay.addWidget(lab)
             cgrid.addWidget(card, 0, i)
         root.addWidget(cells)
+        self.apply_compact_dashboard(self.pack_config()["compact"])
 
         self.shutdown_banner = QLabel("")
         self.shutdown_banner.setObjectName("shutdownBanner")
@@ -596,6 +898,25 @@ class MainWindow(QMainWindow):
         self.s_autostart.setChecked(bool(cfg.get("auto_start_on_power", True)))
         self.s_auto_update = QCheckBox("Automatically check GitHub for Pi-Batt updates")
         self.s_auto_update.setChecked(bool(cfg.get("auto_update_check", True)))
+        self.s_cell_capacity = QSpinBox(); self.s_cell_capacity.setRange(100, 20000); self.s_cell_capacity.setSuffix(" mAh"); self.s_cell_capacity.setValue(int(cfg.get("cell_capacity_mah", 5000)))
+        self.s_series = QSpinBox(); self.s_series.setRange(1, 8); self.s_series.setValue(int(cfg.get("series_cells", 4)))
+        self.s_parallel = QSpinBox(); self.s_parallel.setRange(1, 8); self.s_parallel.setValue(int(cfg.get("parallel_strings", 1)))
+        self.s_nominal_v = QDoubleSpinBox(); self.s_nominal_v.setRange(1.0, 5.0); self.s_nominal_v.setDecimals(2); self.s_nominal_v.setSingleStep(0.05); self.s_nominal_v.setSuffix(" V"); self.s_nominal_v.setValue(float(cfg.get("nominal_cell_voltage_v", 3.7)))
+        self.s_compact = QCheckBox("Use compact dashboard (hide secondary input/status and cell cards)")
+        self.s_compact.setChecked(bool(cfg.get("compact_dashboard", False)))
+
+        profile = QGroupBox("Battery pack profile")
+        pf = QFormLayout(profile)
+        pf.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        pf.setHorizontalSpacing(16); pf.setVerticalSpacing(10)
+        pf.addRow("Cell capacity", self.s_cell_capacity)
+        pf.addRow("Cells in series", self.s_series)
+        pf.addRow("Parallel strings", self.s_parallel)
+        pf.addRow("Nominal cell voltage", self.s_nominal_v)
+        pack = self.pack_config()
+        self.pack_preview = QLabel(f"{pack['label']} • {pack['pack_mah']:,} mAh • {pack['pack_v']:.1f} V • {pack['pack_wh']:.1f} Wh")
+        self.pack_preview.setObjectName("muted")
+        pf.addRow("Calculated pack", self.pack_preview)
 
         thresholds = QGroupBox("Battery thresholds")
         form = QFormLayout(thresholds)
@@ -625,7 +946,9 @@ class MainWindow(QMainWindow):
         gf.addRow("Keep history", self.s_retention)
         gf.addRow(self.s_autostart)
         gf.addRow(self.s_auto_update)
+        gf.addRow(self.s_compact)
 
+        root.addWidget(profile)
         root.addWidget(thresholds)
         root.addWidget(timing)
         root.addWidget(general)
@@ -692,9 +1015,15 @@ class MainWindow(QMainWindow):
         self.events.horizontalHeader().setStretchLastSection(True)
         self.events.setMinimumHeight(240)
         root.addWidget(self.events)
+        diag_buttons = QHBoxLayout()
         b = QPushButton("Refresh diagnostics")
         b.clicked.connect(self.refresh_events)
-        root.addWidget(b, 0, Qt.AlignLeft)
+        copy_btn = QPushButton("Copy diagnostics")
+        copy_btn.clicked.connect(self.copy_diagnostics)
+        diag_buttons.addWidget(b)
+        diag_buttons.addWidget(copy_btn)
+        diag_buttons.addStretch()
+        root.addLayout(diag_buttons)
         self.refresh_events()
 
     def apply_startup_update_status(self):
@@ -857,13 +1186,22 @@ class MainWindow(QMainWindow):
             "warning_percent": self.s_warning.value(), "critical_percent": self.s_critical.value(), "shutdown_percent": self.s_shutdown.value(),
             "shutdown_confirm_seconds": self.s_confirm.value(), "shutdown_countdown_seconds": self.s_countdown.value(), "emergency_cell_mv": self.s_cell.value(), "history_retention_days": self.s_retention.value(),
             "shutdown_enabled": self.s_shutdown_enable.isChecked(), "trigger_hat_power_cut": self.s_cut.isChecked(), "auto_start_on_power": self.s_autostart.isChecked(),
-            "auto_update_check": self.s_auto_update.isChecked()
+            "auto_update_check": self.s_auto_update.isChecked(),
+            "cell_capacity_mah": self.s_cell_capacity.value(), "series_cells": self.s_series.value(),
+            "parallel_strings": self.s_parallel.value(), "nominal_cell_voltage_v": self.s_nominal_v.value(),
+            "compact_dashboard": self.s_compact.isChecked()
         })
         try:
             tmp = CONFIG_PATH.with_suffix(".tmp")
             with tmp.open("w") as f:
                 json.dump(cfg, f, indent=2)
             os.replace(tmp, CONFIG_PATH)
+            pack_mah = self.s_cell_capacity.value() * self.s_parallel.value()
+            pack_v = self.s_nominal_v.value() * self.s_series.value()
+            pack_wh = pack_mah / 1000.0 * pack_v
+            self.pack_preview.setText(f"{self.s_series.value()}S{self.s_parallel.value()}P • {pack_mah:,} mAh • {pack_v:.1f} V • {pack_wh:.1f} Wh")
+            self.apply_compact_dashboard(self.s_compact.isChecked())
+            self.refresh_health(self.last)
             QMessageBox.information(self, "Pi-Batt", "Settings saved. The daemon will reload them automatically.")
         except Exception as e:
             QMessageBox.critical(self, "Pi-Batt", f"Could not save settings:\n{e}\n\nIf this is the first launch after install, log out/in once so your pi-batt group membership is active.")
@@ -890,13 +1228,20 @@ class MainWindow(QMainWindow):
         bar_color = "#48d597" if pct > 20 else "#f6bd4b" if pct > 10 else "#ff6b6b"
         self.battery_bar.setStyleSheet(f"QProgressBar#batteryBar::chunk {{ background: {bar_color}; border-radius: 6px; }}")
 
-        eta_text = human_eta(d.get("eta_minutes"))
+        native_minutes = d.get("remaining_charge_min") if charging else d.get("remaining_discharge_min")
+        smart_minutes = self.calculate_runtime_eta(d)
+        best_minutes = native_minutes if native_minutes is not None else smart_minutes
+        if best_minutes is None:
+            best_minutes = d.get("eta_minutes")
+        eta_text = human_eta(best_minutes)
         self.hero_eta.setText(f"ETA {eta_text}")
         self.hero_input.setText(f"Input {d.get('vbus_power_mw', 0)/1000:.1f} W • Battery {d.get('battery_voltage_mv', 0)/1000:.2f} V")
         age = max(0, int(time.time() - float(d.get("timestamp", time.time()))))
         self.hero_summary.setText(f"{d.get('remaining_capacity_mah', 0)} mAh remaining • sample {age} s ago")
 
         self.metrics["eta"].setText(eta_text)
+        self.metrics["hat_eta"].setText(human_eta(native_minutes))
+        self.metrics["smart_eta"].setText(human_eta(smart_minutes))
         self.metrics["batt_v"].setText(f"{d.get('battery_voltage_mv', 0)/1000:.3f} V")
         self.metrics["batt_i"].setText(f"{d.get('battery_current_ma', 0)/1000:+.3f} A")
         self.metrics["batt_p"].setText(f"{d.get('battery_power_mw', 0)/1000:+.2f} W")
@@ -906,7 +1251,8 @@ class MainWindow(QMainWindow):
         self.metrics["vbus_p"].setText(f"{d.get('vbus_power_mw', 0)/1000:.2f} W")
         self.metrics["delta"].setText(f"{d.get('cell_delta_mv', 0)} mV")
         self.metrics["rolling_i"].setText(f"{d.get('rolling_battery_current_ma', 0)/1000:+.3f} A")
-        self.metrics["eta_source"].setText(str(d.get("eta_source", "—")).title())
+        eta_source = "HAT native" if native_minutes is not None else ("Pi-Batt" if smart_minutes is not None else str(d.get("eta_source", "—")).title())
+        self.metrics["eta_source"].setText(eta_source)
         self.metrics["sample_age"].setText(f"{age} s ago")
         for i, v in enumerate(d.get("cells_mv", [0, 0, 0, 0])):
             self.cell_labels[i].setText(f"{v/1000:.3f} V")
@@ -950,6 +1296,10 @@ class MainWindow(QMainWindow):
         self.diag_labels["charge"].setText(d.get("charge_state", "—"))
         self.diag_labels["id"].setText(hex(d.get("id", 0)))
         self.last = d
+        self.apply_compact_dashboard(self.pack_config()["compact"])
+        if time.time() - self.last_health_refresh >= 15:
+            self.refresh_health(d)
+            self.last_health_refresh = time.time()
 
     def _history_seconds(self):
         return [86400, 7 * 86400, 30 * 86400, 90 * 86400][self.range.currentIndex()]

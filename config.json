@@ -13,5 +13,10 @@
   "auto_start_on_power": true,
   "event_debounce_seconds": 6,
   "auto_update_check": true,
-  "update_check_hours": 6
+  "update_check_hours": 6,
+  "cell_capacity_mah": 5000,
+  "series_cells": 4,
+  "parallel_strings": 1,
+  "nominal_cell_voltage_v": 3.7,
+  "compact_dashboard": false
 }

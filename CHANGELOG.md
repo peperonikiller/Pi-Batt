@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0
+- Add configurable battery pack profile: cell mAh, series cells, parallel strings, and nominal cell voltage.
+- Calculate pack configuration, total pack mAh, nominal voltage, and nominal watt-hours.
+- Add a Health tab with estimated full-charge capacity, health percentage/state, capacity trend, cell balance, and cell high/low values.
+- Add Raspberry Pi CPU temperature, load average, RAM usage, and throttling/undervoltage status.
+- Add Pi-Batt runtime ETA alongside the UPS HAT native ETA, with native ETA preferred when available.
+- Add 30-day battery statistics for average discharge/charge power, minimum battery %, maximum cell spread, total outage time, and longest outage.
+- Add optional compact dashboard mode for very small screens.
+- Add Copy Diagnostics for quick support/troubleshooting reports.
+- Move GUI updater requests from `/run/pi-batt` to persistent `/var/lib/pi-batt` storage to prevent reboot-time permissions failures.
+
 ## 1.0.3
 - Redesign the GUI again for smaller Raspberry Pi displays with tighter spacing and improved readability.
 - Make all major tabs scrollable so the interface remains usable on shorter screens.

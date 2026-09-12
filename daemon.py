@@ -13,7 +13,7 @@ from tempfile import NamedTemporaryFile
 from pibatt_hw import UPSHatE
 
 VERSION_PATH = Path("/opt/pi-batt/VERSION")
-UPDATE_REQUEST_PATH = Path("/run/pi-batt/update-request.json")
+UPDATE_REQUEST_PATH = Path("/var/lib/pi-batt/update-request.json")
 UPDATE_STATUS_PATH = Path("/run/pi-batt/update-status.json")
 
 APP = "Pi-Batt"
@@ -39,6 +39,11 @@ DEFAULT_CONFIG = {
     "event_debounce_seconds": 6,
     "auto_update_check": True,
     "update_check_hours": 6,
+    "cell_capacity_mah": 5000,
+    "series_cells": 4,
+    "parallel_strings": 1,
+    "nominal_cell_voltage_v": 3.7,
+    "compact_dashboard": False,
 }
 
 running = True
