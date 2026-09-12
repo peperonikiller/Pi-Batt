@@ -59,9 +59,9 @@ PY
 fi
 
 # Let the installing desktop user manage settings and create narrow update requests.
-sudo chown root:"$USER_GROUP" /etc/pi-batt/config.json /var/lib/pi-batt /run/pi-batt
+sudo chown root:"$USER_GROUP" /etc/pi-batt /etc/pi-batt/config.json /var/lib/pi-batt /run/pi-batt
+sudo chmod 775 /etc/pi-batt /var/lib/pi-batt /run/pi-batt
 sudo chmod 664 /etc/pi-batt/config.json
-sudo chmod 775 /var/lib/pi-batt /run/pi-batt
 if [[ -f /var/lib/pi-batt/history.db ]]; then sudo chown root:"$USER_GROUP" /var/lib/pi-batt/history.db; sudo chmod 664 /var/lib/pi-batt/history.db; fi
 
 sudo cp pi-batt.service /etc/systemd/system/pi-batt.service

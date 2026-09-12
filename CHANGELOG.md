@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2
+- Redesign the Pi-Batt GUI with a modern dark dashboard, status hero card, battery bar, cleaner metric cards, and improved tab styling.
+- Reorganize Settings into clearer battery, shutdown, and general sections.
+- Improve Diagnostics layout and recent-events presentation.
+- Fix settings-save permissions by making `/etc/pi-batt` group-writable for the installing desktop user.
+- Treat the IP2368 controller as idle during normal battery operation instead of incorrectly showing a hard error.
+- Add clearer shutdown-protection state colors and dashboard input/ETA summary.
+- Add a documented hardware compatibility matrix and clarify that the current backend targets the Waveshare UPS HAT (E) protocol.
+
 ## 1.0.1
 - Fix repeated restart prompt after updater completes.
 - Add single-instance protection for the tray app.

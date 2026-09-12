@@ -1,6 +1,14 @@
-# Pi-Batt v1.0.0
+# Pi-Batt v1.0.2
 
 Pi-Batt is a Raspberry Pi desktop + system service monitor for the Waveshare UPS HAT (E). It began as PiUPS and was renamed before the first public release.
+
+## v1.0.2 UI and reliability update
+
+Version 1.0.2 refreshes the desktop experience with a dark card-based dashboard, a large battery/status header, clearer settings sections, improved diagnostics, and corrected IP2368 battery-mode reporting. It also fixes the `/etc/pi-batt` directory permissions required for atomic settings saves.
+
+## Hardware compatibility
+
+Pi-Batt currently supports the **Waveshare UPS HAT (E), SKU 27966** and hardware-identical rebrands that implement the exact same I2C MCU register map. Other Waveshare UPS HAT variants (B/C/D/original) use different telemetry hardware/protocols and are not yet supported. See [`HARDWARE_COMPATIBILITY.md`](HARDWARE_COMPATIBILITY.md) for the full compatibility matrix and protocol details.
 
 ## Features
 
@@ -84,20 +92,20 @@ On Linux:
 This creates:
 
 ```text
-dist/Pi-Batt-v1.0.0.zip
-dist/Pi-Batt-v1.0.0.zip.sha256
+dist/Pi-Batt-v1.0.2.zip
+dist/Pi-Batt-v1.0.2.zip.sha256
 ```
 
 Upload both files to the matching GitHub Release.
 
 ## First updater validation
 
-After publishing GitHub release `v1.0.0` and uploading the ZIP + SHA256 assets:
+After publishing a matching GitHub release and uploading the ZIP + SHA256 assets:
 
 1. Open Pi-Batt → **Updates**.
-2. Click **Check for updates**. It should report that v1.0.0 is current.
+2. Click **Check for updates**. It should report that the installed version is current.
 3. Click **Verify release package**. This downloads the GitHub asset, validates SHA256, extracts it, validates the manifest, and Python-compiles the payload without replacing your installed copy.
-4. Click **Reinstall latest** to exercise the complete self-update path on the same v1.0.0 release.
+4. Click **Reinstall latest** to exercise the complete self-update path on the same release.
 5. Accept **Restart Pi-Batt** when prompted.
 6. Confirm `pi-battctl status` and the dashboard still work.
 

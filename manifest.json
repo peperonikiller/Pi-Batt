@@ -1,6 +1,6 @@
 {
   "product": "Pi-Batt",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "github_repo": "peperonikiller/Pi-Batt",
   "update_asset_pattern": "Pi-Batt-v{version}.zip",
   "checksum_required": true

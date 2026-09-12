@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFormLayout, QGridLayout, QGroupBox,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSpinBox,
     QSystemTrayIcon, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget, QTextEdit
+    QWidget, QTextEdit, QProgressBar, QFrame, QSizePolicy
 )
 
 CONFIG_PATH = Path("/etc/pi-batt/config.json")
@@ -47,6 +47,137 @@ def version_tuple(value):
         return tuple(int(x) for x in s.split("."))
     except Exception:
         return (0,)
+
+
+APP_STYLESHEET = r"""
+QMainWindow, QWidget {
+    background: #0f1722;
+    color: #dce7f5;
+    font-size: 10.5pt;
+}
+QTabWidget::pane {
+    border: 1px solid #26364c;
+    border-radius: 10px;
+    background: #111b29;
+    top: -1px;
+}
+QTabBar::tab {
+    background: transparent;
+    color: #8ea0b7;
+    padding: 11px 17px;
+    margin-right: 3px;
+    border-bottom: 3px solid transparent;
+    font-weight: 600;
+}
+QTabBar::tab:selected {
+    color: #eef7ff;
+    border-bottom: 3px solid #42c6ff;
+}
+QTabBar::tab:hover { color: #ffffff; background: #162235; }
+QFrame#heroCard, QGroupBox {
+    background: #172235;
+    border: 1px solid #2a3a51;
+    border-radius: 12px;
+}
+QFrame#heroCard { background: #142033; }
+QGroupBox {
+    margin-top: 11px;
+    padding: 14px 12px 12px 12px;
+    font-weight: 600;
+    color: #9db0c8;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+    color: #8fa5bf;
+}
+QGroupBox#metricCard {
+    min-height: 80px;
+    background: #18263a;
+}
+QLabel#heroPercent {
+    color: #ffffff;
+    font-size: 38pt;
+    font-weight: 800;
+}
+QLabel#modeBadge {
+    background: #203149;
+    color: #dff4ff;
+    border: 1px solid #36516e;
+    border-radius: 12px;
+    padding: 6px 12px;
+    font-weight: 700;
+}
+QLabel#muted { color: #8699b2; }
+QLabel#sectionTitle {
+    font-size: 18pt;
+    font-weight: 750;
+    color: #f4f8fc;
+}
+QLabel#shutdownBanner {
+    border-radius: 9px;
+    padding: 9px 12px;
+    background: #132b27;
+    border: 1px solid #24544a;
+    color: #9ee8d1;
+    font-weight: 600;
+}
+QProgressBar#batteryBar {
+    background: #0d1520;
+    border: 1px solid #2c4058;
+    border-radius: 7px;
+    min-height: 13px;
+    max-height: 13px;
+}
+QProgressBar#batteryBar::chunk {
+    background: #48d597;
+    border-radius: 6px;
+}
+QPushButton {
+    background: #21334b;
+    border: 1px solid #36506e;
+    border-radius: 8px;
+    padding: 8px 14px;
+    color: #e9f4ff;
+    font-weight: 600;
+}
+QPushButton:hover { background: #2a4160; border-color: #4b729b; }
+QPushButton:pressed { background: #19293d; }
+QPushButton:disabled { color: #64758b; background: #172231; border-color: #26364a; }
+QPushButton#primaryButton { background: #1579a8; border-color: #38bdf8; }
+QPushButton#primaryButton:hover { background: #188dbf; }
+QSpinBox, QComboBox, QTextEdit {
+    background: #101a28;
+    border: 1px solid #31445d;
+    border-radius: 7px;
+    padding: 6px 8px;
+    color: #e4edf7;
+    selection-background-color: #237ca7;
+}
+QSpinBox:focus, QComboBox:focus, QTextEdit:focus { border-color: #42c6ff; }
+QCheckBox { spacing: 9px; padding: 4px 0; }
+QTableWidget {
+    background: #101a28;
+    alternate-background-color: #142133;
+    border: 1px solid #2a3b52;
+    border-radius: 8px;
+    gridline-color: #24354b;
+    color: #d9e6f3;
+}
+QHeaderView::section {
+    background: #1a2a40;
+    color: #a9bcd2;
+    border: none;
+    border-right: 1px solid #2b3d54;
+    padding: 7px;
+    font-weight: 700;
+}
+QToolTip { background: #1a2738; color: white; border: 1px solid #40556f; }
+"""
+
+def apply_app_style(app):
+    app.setStyleSheet(APP_STYLESHEET)
 
 class UpdateCheckWorker(QThread):
     result = pyqtSignal(dict)
@@ -133,12 +264,12 @@ class MiniChart(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = self.rect().adjusted(50, 24, -20, -40)
-        p.setPen(self.palette().text().color())
+        p.setPen(QColor("#dce7f5"))
         p.drawText(10, 18, self.title)
         if len(self.points) < 2:
             p.drawText(r, Qt.AlignCenter, "Waiting for history data…")
             return
-        grid = QColor(self.palette().text().color()); grid.setAlpha(55)
+        grid = QColor("#34465d")
         p.setPen(QPen(grid, 1))
         for i in range(5):
             y = r.top() + i * r.height() / 4
@@ -157,10 +288,10 @@ class MiniChart(QWidget):
             py = max(r.top(), min(r.bottom(), py))
             if i == 0: path.moveTo(QPointF(px,py))
             else: path.lineTo(QPointF(px,py))
-        accent = self.palette().highlight().color()
+        accent = QColor("#42c6ff")
         p.setPen(QPen(accent, 3))
         p.drawPath(path)
-        p.setPen(self.palette().text().color())
+        p.setPen(QColor("#91a5bc"))
         p.drawText(r.left(), r.bottom()+25, time.strftime("%m/%d %H:%M", time.localtime(xmin)))
         end = time.strftime("%m/%d %H:%M", time.localtime(xmax))
         p.drawText(r.right()-120, r.bottom()+25, 120, 20, Qt.AlignRight, end)
@@ -173,9 +304,10 @@ class MainWindow(QMainWindow):
         self.prev_vbus = None
         self.prev_warning = "normal"
         self.setWindowTitle(f"Pi-Batt v{APP_VERSION}")
-        self.resize(860, 620)
+        self.resize(980, 720)
+        self.setMinimumSize(860, 640)
 
-        tabs = QTabWidget(); self.setCentralWidget(tabs)
+        tabs = QTabWidget(); tabs.setDocumentMode(True); self.setCentralWidget(tabs)
         self.dashboard = QWidget(); self.history = QWidget(); self.settings = QWidget(); self.diag = QWidget(); self.updates = QWidget()
         tabs.addTab(self.dashboard, "Dashboard")
         tabs.addTab(self.history, "History")
@@ -207,10 +339,28 @@ class MainWindow(QMainWindow):
 
     def build_dashboard(self):
         root = QVBoxLayout(self.dashboard)
-        top = QHBoxLayout(); root.addLayout(top)
-        self.percent = self.make_metric_label("—%", True); self.mode = self.make_metric_label("Waiting…", True)
-        top.addWidget(self.percent); top.addStretch(); top.addWidget(self.mode)
-        grid = QGridLayout(); root.addLayout(grid)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
+
+        hero = QFrame(); hero.setObjectName("heroCard")
+        hero_l = QHBoxLayout(hero); hero_l.setContentsMargins(20, 18, 20, 18); hero_l.setSpacing(22)
+
+        left = QVBoxLayout(); left.setSpacing(4)
+        kicker = QLabel("UPS BATTERY") ; kicker.setObjectName("muted")
+        self.percent = QLabel("—%") ; self.percent.setObjectName("heroPercent")
+        self.battery_bar = QProgressBar(); self.battery_bar.setObjectName("batteryBar"); self.battery_bar.setRange(0,100); self.battery_bar.setTextVisible(False)
+        left.addWidget(kicker); left.addWidget(self.percent); left.addWidget(self.battery_bar)
+        hero_l.addLayout(left, 2)
+
+        right = QVBoxLayout(); right.setSpacing(7)
+        self.mode = QLabel("Waiting…"); self.mode.setObjectName("modeBadge"); self.mode.setAlignment(Qt.AlignCenter)
+        self.hero_eta = QLabel("ETA —"); self.hero_eta.setAlignment(Qt.AlignRight); self.hero_eta.setObjectName("sectionTitle")
+        self.hero_input = QLabel("Input —"); self.hero_input.setAlignment(Qt.AlignRight); self.hero_input.setObjectName("muted")
+        right.addWidget(self.mode, 0, Qt.AlignRight); right.addStretch(); right.addWidget(self.hero_eta); right.addWidget(self.hero_input)
+        hero_l.addLayout(right, 1)
+        root.addWidget(hero)
+
+        grid = QGridLayout(); grid.setHorizontalSpacing(12); grid.setVerticalSpacing(12); root.addLayout(grid)
         labels = [
             ("ETA", "eta"), ("Battery voltage", "batt_v"), ("Battery current", "batt_i"),
             ("Battery power", "batt_p"), ("Remaining capacity", "capacity"), ("USB-C voltage", "vbus_v"),
@@ -219,17 +369,23 @@ class MainWindow(QMainWindow):
         ]
         self.metrics = {}
         for idx,(name,key) in enumerate(labels):
-            box=QGroupBox(name); lay=QVBoxLayout(box); val=self.make_metric_label("—", True); lay.addWidget(val); self.metrics[key]=val
-            grid.addWidget(box, idx//4, idx%4)
-        cells=QGroupBox("Cell voltages"); cgrid=QGridLayout(cells); self.cell_labels=[]
+            box=QGroupBox(name); box.setObjectName("metricCard")
+            lay=QVBoxLayout(box); lay.setContentsMargins(10, 13, 10, 10)
+            val=self.make_metric_label("—", True); val.setAlignment(Qt.AlignCenter); lay.addWidget(val)
+            self.metrics[key]=val; grid.addWidget(box, idx//4, idx%4)
+
+        cells=QGroupBox("Cell voltages"); cgrid=QGridLayout(cells); cgrid.setHorizontalSpacing(16); self.cell_labels=[]
         for i in range(4):
-            lab=self.make_metric_label("—", True); self.cell_labels.append(lab); cgrid.addWidget(QLabel(f"Cell {i+1}"),0,i); cgrid.addWidget(lab,1,i)
+            name=QLabel(f"CELL {i+1}"); name.setObjectName("muted"); name.setAlignment(Qt.AlignCenter)
+            lab=self.make_metric_label("—", True); lab.setAlignment(Qt.AlignCenter); self.cell_labels.append(lab)
+            cgrid.addWidget(name,0,i); cgrid.addWidget(lab,1,i)
         root.addWidget(cells)
-        self.shutdown_banner=QLabel(""); self.shutdown_banner.setAlignment(Qt.AlignCenter); root.addWidget(self.shutdown_banner)
-        root.addStretch()
+
+        self.shutdown_banner=QLabel(""); self.shutdown_banner.setObjectName("shutdownBanner"); self.shutdown_banner.setAlignment(Qt.AlignCenter); root.addWidget(self.shutdown_banner)
 
     def build_history(self):
-        root=QVBoxLayout(self.history)
+        root=QVBoxLayout(self.history); root.setContentsMargins(18,18,18,18); root.setSpacing(12)
+        title=QLabel("Battery history"); title.setObjectName("sectionTitle"); root.addWidget(title)
         row=QHBoxLayout(); root.addLayout(row)
         self.range=QComboBox(); self.range.addItems(["24 hours","7 days","30 days","90 days"]); self.range.currentIndexChanged.connect(self.refresh_history)
         self.series=QComboBox(); self.series.addItems(["Battery %","Battery voltage","Battery current","Battery power","Input power","Cell delta"]); self.series.currentIndexChanged.connect(self.refresh_history)
@@ -237,11 +393,12 @@ class MainWindow(QMainWindow):
         self.chart=MiniChart(); root.addWidget(self.chart)
 
     def build_settings(self):
-        root=QVBoxLayout(self.settings); form=QFormLayout(); root.addLayout(form)
+        root=QVBoxLayout(self.settings); root.setContentsMargins(18,18,18,18); root.setSpacing(14)
+        title=QLabel("Power protection settings"); title.setObjectName("sectionTitle"); root.addWidget(title)
         cfg=read_json(CONFIG_PATH, DEFAULT_CONFIG.copy()) or DEFAULT_CONFIG.copy()
-        self.s_warning=QSpinBox(); self.s_warning.setRange(1,99); self.s_warning.setValue(int(cfg.get("warning_percent",20)))
-        self.s_critical=QSpinBox(); self.s_critical.setRange(1,99); self.s_critical.setValue(int(cfg.get("critical_percent",10)))
-        self.s_shutdown=QSpinBox(); self.s_shutdown.setRange(1,50); self.s_shutdown.setValue(int(cfg.get("shutdown_percent",5)))
+        self.s_warning=QSpinBox(); self.s_warning.setRange(1,99); self.s_warning.setSuffix(" %"); self.s_warning.setValue(int(cfg.get("warning_percent",20)))
+        self.s_critical=QSpinBox(); self.s_critical.setRange(1,99); self.s_critical.setSuffix(" %"); self.s_critical.setValue(int(cfg.get("critical_percent",10)))
+        self.s_shutdown=QSpinBox(); self.s_shutdown.setRange(1,50); self.s_shutdown.setSuffix(" %"); self.s_shutdown.setValue(int(cfg.get("shutdown_percent",5)))
         self.s_confirm=QSpinBox(); self.s_confirm.setRange(5,300); self.s_confirm.setSuffix(" s"); self.s_confirm.setValue(int(cfg.get("shutdown_confirm_seconds",20)))
         self.s_countdown=QSpinBox(); self.s_countdown.setRange(10,600); self.s_countdown.setSuffix(" s"); self.s_countdown.setValue(int(cfg.get("shutdown_countdown_seconds",60)))
         self.s_cell=QSpinBox(); self.s_cell.setRange(2600,3600); self.s_cell.setSuffix(" mV"); self.s_cell.setValue(int(cfg.get("emergency_cell_mv",3000)))
@@ -249,25 +406,36 @@ class MainWindow(QMainWindow):
         self.s_shutdown_enable=QCheckBox("Enable automatic graceful shutdown"); self.s_shutdown_enable.setChecked(bool(cfg.get("shutdown_enabled",False)))
         self.s_cut=QCheckBox("Arm HAT power-cut timer immediately before Linux poweroff"); self.s_cut.setChecked(bool(cfg.get("trigger_hat_power_cut",False)))
         self.s_autostart=QCheckBox("Auto-start Pi when external power returns"); self.s_autostart.setChecked(bool(cfg.get("auto_start_on_power",True)))
-        form.addRow("Low battery warning", self.s_warning); form.addRow("Critical warning", self.s_critical); form.addRow("Shutdown threshold", self.s_shutdown)
-        form.addRow("Low condition confirmation", self.s_confirm); form.addRow("Shutdown countdown", self.s_countdown); form.addRow("Emergency minimum cell", self.s_cell); form.addRow("Keep history", self.s_retention)
         self.s_auto_update=QCheckBox("Automatically check GitHub for Pi-Batt updates"); self.s_auto_update.setChecked(bool(cfg.get("auto_update_check",True)))
-        form.addRow(self.s_shutdown_enable); form.addRow(self.s_cut); form.addRow(self.s_autostart); form.addRow(self.s_auto_update)
-        note=QLabel("Safety: HAT power-cut is off by default. Waveshare's 0x55 command schedules an irreversible power cut ~30 seconds later. Enable it only after normal shutdown testing succeeds."); note.setWordWrap(True); root.addWidget(note)
+
+        thresholds=QGroupBox("Battery thresholds"); form=QFormLayout(thresholds)
+        form.addRow("Low battery warning", self.s_warning); form.addRow("Critical warning", self.s_critical); form.addRow("Shutdown threshold", self.s_shutdown); form.addRow("Emergency minimum cell", self.s_cell)
+        timing=QGroupBox("Shutdown behavior"); tf=QFormLayout(timing)
+        tf.addRow("Low condition confirmation", self.s_confirm); tf.addRow("Shutdown countdown", self.s_countdown); tf.addRow(self.s_shutdown_enable); tf.addRow(self.s_cut)
+        general=QGroupBox("General"); gf=QFormLayout(general)
+        gf.addRow("Keep history", self.s_retention); gf.addRow(self.s_autostart); gf.addRow(self.s_auto_update)
+        root.addWidget(thresholds); root.addWidget(timing); root.addWidget(general)
+        note=QLabel("Safety: the HAT power-cut command is irreversible once armed and cuts power about 30 seconds later. Enable it only after graceful shutdown testing succeeds."); note.setWordWrap(True); note.setObjectName("muted"); root.addWidget(note)
         buttons=QHBoxLayout(); root.addLayout(buttons)
-        btn=QPushButton("Save settings"); btn.clicked.connect(self.save_settings); buttons.addWidget(btn)
+        btn=QPushButton("Save settings"); btn.setObjectName("primaryButton"); btn.clicked.connect(self.save_settings); buttons.addWidget(btn)
         test_btn=QPushButton("Test notification"); test_btn.clicked.connect(lambda: self.tray.showMessage("Pi-Batt test", "Desktop notifications are working.", QSystemTrayIcon.Information, 5000)); buttons.addWidget(test_btn)
         buttons.addStretch(); root.addStretch()
 
     def build_diag(self):
-        root=QVBoxLayout(self.diag)
+        root=QVBoxLayout(self.diag); root.setContentsMargins(18,18,18,18); root.setSpacing(12)
+        title=QLabel("UPS diagnostics"); title.setObjectName("sectionTitle"); root.addWidget(title)
         self.diag_labels={}
-        form=QFormLayout(); root.addLayout(form)
-        for name,key in [("Connection","connected"),("Firmware","firmware"),("BQ4050","bq"),("IP2368","ip"),("Auto-start","auto"),("Charge state","charge"),("I²C ID","id"),("Outages (24h)","outages24"),("Longest outage (7d)","longest7"),("Current outage","current_outage")]:
-            l=QLabel("—"); self.diag_labels[key]=l; form.addRow(name,l)
-        root.addWidget(QLabel("Recent events"))
-        self.events=QTableWidget(0,3); self.events.setHorizontalHeaderLabels(["Time","Event","Details"]); self.events.horizontalHeader().setStretchLastSection(True); root.addWidget(self.events)
-        b=QPushButton("Refresh diagnostics"); b.clicked.connect(self.refresh_events); root.addWidget(b)
+        summary=QGroupBox("Hardware status"); grid=QGridLayout(summary); grid.setHorizontalSpacing(24); grid.setVerticalSpacing(9)
+        items=[("Connection","connected"),("Firmware","firmware"),("BQ4050 fuel gauge","bq"),("IP2368 power controller","ip"),("Auto-start","auto"),("Charge state","charge"),("I²C ID","id"),("Outages (24h)","outages24"),("Longest outage (7d)","longest7"),("Current outage","current_outage")]
+        for idx,(name,key) in enumerate(items):
+            name_l=QLabel(name); name_l.setObjectName("muted")
+            val=QLabel("—"); val.setStyleSheet("font-weight: 700;")
+            self.diag_labels[key]=val
+            col=(idx%2)*2; row=idx//2; grid.addWidget(name_l,row,col); grid.addWidget(val,row,col+1)
+        root.addWidget(summary)
+        recent=QLabel("Recent events"); recent.setObjectName("sectionTitle"); root.addWidget(recent)
+        self.events=QTableWidget(0,3); self.events.setAlternatingRowColors(True); self.events.setHorizontalHeaderLabels(["Time","Event","Details"]); self.events.horizontalHeader().setStretchLastSection(True); root.addWidget(self.events)
+        b=QPushButton("Refresh diagnostics"); b.clicked.connect(self.refresh_events); root.addWidget(b,0,Qt.AlignLeft)
         self.refresh_events()
 
     def apply_startup_update_status(self):
@@ -284,8 +452,8 @@ class MainWindow(QMainWindow):
             self.update_latest.setText(f"Installed successfully: v{ver}")
 
     def build_updates(self):
-        root=QVBoxLayout(self.updates)
-        title=QLabel("Pi-Batt updater"); f=title.font(); f.setPointSize(18); f.setBold(True); title.setFont(f); root.addWidget(title)
+        root=QVBoxLayout(self.updates); root.setContentsMargins(18,18,18,18); root.setSpacing(12)
+        title=QLabel("Pi-Batt updater"); title.setObjectName("sectionTitle"); f=title.font(); f.setPointSize(18); f.setBold(True); title.setFont(f); root.addWidget(title)
         self.update_current=QLabel(f"Installed version: v{APP_VERSION}"); root.addWidget(self.update_current)
         self.update_latest=QLabel("Latest release: not checked yet"); root.addWidget(self.update_latest)
         self.update_state=QLabel("Updater idle"); self.update_state.setWordWrap(True); root.addWidget(self.update_state)
@@ -389,7 +557,13 @@ class MainWindow(QMainWindow):
             self.mode.setText("UPS disconnected"); self.tray.setIcon(make_battery_icon(0,False,False)); self.tray.setToolTip("Pi-Batt: UPS disconnected"); return
         pct=int(d.get("battery_percent",0)); charging=bool(d.get("charging",False)); mode=d.get("mode","—")
         self.percent.setText(f"{pct}%"); self.mode.setText(mode)
-        self.metrics["eta"].setText(human_eta(d.get("eta_minutes")))
+        self.battery_bar.setValue(pct)
+        bar_color = "#48d597" if pct > 20 else "#f6bd4b" if pct > 10 else "#ff6b6b"
+        self.battery_bar.setStyleSheet(f"QProgressBar#batteryBar::chunk {{ background: {bar_color}; border-radius: 6px; }}")
+        eta_text = human_eta(d.get("eta_minutes"))
+        self.hero_eta.setText(f"ETA {eta_text}")
+        self.hero_input.setText(f"Input {d.get('vbus_power_mw',0)/1000:.1f} W  •  Battery {d.get('battery_voltage_mv',0)/1000:.2f} V")
+        self.metrics["eta"].setText(eta_text)
         self.metrics["batt_v"].setText(f"{d.get('battery_voltage_mv',0)/1000:.3f} V")
         self.metrics["batt_i"].setText(f"{d.get('battery_current_ma',0)/1000:+.3f} A")
         self.metrics["batt_p"].setText(f"{d.get('battery_power_mw',0)/1000:+.2f} W")
@@ -404,10 +578,13 @@ class MainWindow(QMainWindow):
         for i,v in enumerate(d.get("cells_mv",[0,0,0,0])): self.cell_labels[i].setText(f"{v/1000:.3f} V")
         if d.get("shutdown_pending"):
             self.shutdown_banner.setText(f"⚠ Automatic shutdown in {d.get('shutdown_countdown',0)} seconds — reconnect external power to cancel")
+            self.shutdown_banner.setStyleSheet("background:#3b1c22;border:1px solid #7b3340;color:#ffb1bd;border-radius:9px;padding:9px 12px;font-weight:700;")
         elif d.get("shutdown_enabled"):
-            self.shutdown_banner.setText("Automatic shutdown protection enabled")
+            self.shutdown_banner.setText("✓ Automatic shutdown protection enabled")
+            self.shutdown_banner.setStyleSheet("background:#132b27;border:1px solid #24544a;color:#9ee8d1;border-radius:9px;padding:9px 12px;font-weight:700;")
         else:
-            self.shutdown_banner.setText("Automatic shutdown protection is currently disabled")
+            self.shutdown_banner.setText("Automatic shutdown protection is disabled")
+            self.shutdown_banner.setStyleSheet("background:#302717;border:1px solid #66532a;color:#f3d68e;border-radius:9px;padding:9px 12px;font-weight:700;")
 
         icon=make_battery_icon(pct,charging,True); self.tray.setIcon(icon); self.setWindowIcon(icon)
         eta=human_eta(d.get("eta_minutes"))
@@ -425,7 +602,13 @@ class MainWindow(QMainWindow):
         self.diag_labels["connected"].setText("Connected")
         self.diag_labels["firmware"].setText("V"+str(d.get("software_version","—")))
         self.diag_labels["bq"].setText("OK" if d.get("bq4050_ok") else "ERROR")
-        self.diag_labels["ip"].setText("OK" if d.get("ip2368_ok") else "ERROR")
+        vbus_now=bool(d.get("vbus_powered_stable", d.get("vbus_powered", False)))
+        if d.get("ip2368_ok"):
+            self.diag_labels["ip"].setText("Active")
+        elif not vbus_now:
+            self.diag_labels["ip"].setText("Idle (battery mode)")
+        else:
+            self.diag_labels["ip"].setText("Check controller")
         self.diag_labels["auto"].setText("Enabled" if d.get("auto_start_on_power") else "Disabled")
         self.diag_labels["charge"].setText(d.get("charge_state","—"))
         self.diag_labels["id"].setText(hex(d.get("id",0)))
@@ -511,7 +694,7 @@ class Tray(QSystemTrayIcon):
         if reason in (QSystemTrayIcon.Trigger,QSystemTrayIcon.DoubleClick): self.open()
 
 def main():
-    app=QApplication(sys.argv); app.setApplicationName("Pi-Batt"); app.setQuitOnLastWindowClosed(False)
+    app=QApplication(sys.argv); app.setApplicationName("Pi-Batt"); app.setQuitOnLastWindowClosed(False); apply_app_style(app)
     runtime=os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
     lock=QLockFile(os.path.join(runtime, f"pi-batt-{os.getuid()}.lock")); lock.setStaleLockTime(0)
     if not lock.tryLock(100):
